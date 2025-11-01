@@ -1,0 +1,163 @@
+
+
+/* Loader */
+/* .loader {
+  width: 48px;
+  height: 48px;
+  border: 3px solid #FFF;
+  border-radius: 50%;
+  border-top-color: transparent;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+} */
+
+/* Spotlight Animation */
+/* @keyframes spotlight {
+  0% {
+    opacity: 0;
+    transform: translate(-72%, -62%) scale(0.5);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -40%) scale(1);
+  }
+}
+
+.animate-spotlight {
+  animation: spotlight 2s ease 0.75s 1 forwards;
+} */
+
+/* Gradient Text */
+/* .bg-gradient-to-b {
+  background-image: linear-gradient(to bottom, var(--tw-gradient-stops));
+}
+
+.from-neutral-50 {
+  --tw-gradient-from: #fafafa;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, rgba(250, 250, 250, 0));
+}
+
+.to-neutral-400 {
+  --tw-gradient-to: #a3a3a3;
+}
+
+.bg-clip-text {
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+.text-transparent {
+  color: transparent;
+} */
+
+/* Card Styles */
+/* .bg-card {
+  background-color: rgba(0, 0, 0, 0.96);
+}
+
+.text-card-foreground {
+  color: white;
+} */
+
+/* Text Colors */
+/* .text-neutral-300 {
+  color: #d4d4d4;
+}
+
+.text-neutral-50 {
+  color: #fafafa;
+}
+
+.text-neutral-400 {
+  color: #a3a3a3;
+} */
+
+
+/* Spotlight Animation - CRITICAL */
+@keyframes spotlight {
+  0% {
+    opacity: 0;
+    transform: translate(-72%, -62%) scale(0.5);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -40%) scale(1);
+  }
+}
+
+.animate-spotlight {
+  animation: spotlight 2s ease 0.75s 1 forwards;
+}
+
+/* Loader */
+.loader {
+  width: 48px;
+  height: 48px;
+  border: 3px solid #FFF;
+  border-radius: 50%;
+  border-top-color: transparent;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Gradient Text */
+.bg-gradient-to-b {
+  background-image: linear-gradient(to bottom, var(--tw-gradient-stops));
+}
+
+.from-neutral-50 {
+  --tw-gradient-from: #fafafa;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, rgba(250, 250, 250, 0));
+}
+
+.to-neutral-400 {
+  --tw-gradient-to: #a3a3a3;
+}
+
+.bg-clip-text {
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+.text-transparent {
+  color: transparent;
+}
+
+/* Card Styles */
+.bg-card {
+  background-color: rgba(0, 0, 0, 0.96);
+}
+
+.text-card-foreground {
+  color: white;
+}
+
+/* Text Colors */
+.text-neutral-300 {
+  color: #d4d4d4;
+}
+
+.text-neutral-50 {
+  color: #fafafa;
+}
+
+.text-neutral-400 {
+  color: #a3a3a3;
+}
+
+/* Ensure body and root have proper background */
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #000;
+}
+
+#root {
+  min-height: 100vh;
+}
