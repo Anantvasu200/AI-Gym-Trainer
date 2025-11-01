@@ -3,17 +3,9 @@ import http from "http";
 import { Server } from "socket.io";
 import cors from "cors";
 import ollama from "ollama";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 
 dotenv.config();
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const publicDir = path.join(__dirname, "public");
-if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir, { recursive: true });
 
 const app = express();
 app.use(cors());
@@ -24,23 +16,103 @@ const io = new Server(server, {
     cors: { origin: process.env.CLIENT_URL || "http://localhost:5173", methods: ["GET", "POST"] },
 });
 
-const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || "pNInz6obpgDQGcFmaJgB";
+// ========== INSTANT FEEDBACK SYSTEM ==========
 
-// ========== PERFORMANCE OPTIMIZATION ==========
-
-// Cache for recent feedback to avoid redundant processing
-const feedbackCache = new Map();
-const CACHE_DURATION = 3000; // 3 seconds
-
-// Session tracking for personalized feedback
 const userSessions = new Map();
+const INSTANT_FEEDBACK_RATE = 3000; // 3s between instant feedback
 
-// Rate limiting to prevent API spam
-const rateLimiter = new Map();
-const RATE_LIMIT_MS = 2000; // Min 2 seconds between requests
+// Pre-defined smart feedback based on angle analysis
+const FEEDBACK_LIBRARY = {
+    squat: {
+        good: [
+            "Perfect depth! Keep it up!",
+            "Great form! Crushing it!",
+            "Solid squat! Nice work!",
+            "Excellent depth! Beast mode!",
+            "Perfect! That's the way!"
+        ],
+        kneesBad: [
+            "Knees caving in! Push them out!",
+            "Knees too far forward! Back more!",
+            "Watch those knees! Stay aligned!"
+        ],
+        depthBad: [
+            "Go deeper! Below parallel!",
+            "Not deep enough! Lower down!",
+            "Quarter squat! Go full depth!"
+        ],
+        backBad: [
+            "Back rounding! Chest up!",
+            "Keep that back straight! Core tight!",
+            "Chest up! Don't lean forward!"
+        ]
+    },
+    pushup: {
+        good: [
+            "Perfect pushup! Strong!",
+            "Full range! Awesome!",
+            "Great form! Keep going!",
+            "Solid! That's the way!"
+        ],
+        elbowsBad: [
+            "Elbows flaring! Tuck them in!",
+            "Elbows too wide! Closer to body!",
+            "Tuck those elbows! 45 degrees!"
+        ],
+        depthBad: [
+            "Go lower! Chest to ground!",
+            "Half rep! Go all the way down!",
+            "Full range! Touch the floor!"
+        ],
+        hipsBad: [
+            "Hips sagging! Plank position!",
+            "Core tight! Straight line!",
+            "Don't let hips drop! Engage core!"
+        ]
+    },
+    plank: {
+        good: [
+            "Perfect plank! Hold it!",
+            "Straight as an arrow! Great!",
+            "Solid form! Keep holding!",
+            "Rock solid! Amazing!"
+        ],
+        hipsBad: [
+            "Hips too high! Lower them!",
+            "Hips sagging! Lift them up!",
+            "Straight line! Adjust hips!"
+        ]
+    },
+    lunge: {
+        good: [
+            "Perfect lunge! Balanced!",
+            "Great depth! Strong!",
+            "Solid form! Keep it up!",
+            "Excellent! That's it!"
+        ],
+        kneeBad: [
+            "Front knee over toes! Back more!",
+            "Back knee higher! 90 degrees!",
+            "Watch that front knee position!"
+        ]
+    },
+    default: {
+        good: [
+            "Good form! Keep going!",
+            "Looking strong! Nice!",
+            "Great work! Keep pushing!",
+            "Solid! Keep it up!"
+        ],
+        bad: [
+            "Adjust your form!",
+            "Watch your posture!",
+            "Focus on form!",
+            "Slow down, check form!"
+        ]
+    }
+};
 
-// ========== ENHANCED POSE ANALYSIS ==========
+// ========== ANGLE CALCULATION ==========
 
 function calculateAngle(a, b, c) {
     const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
@@ -49,13 +121,12 @@ function calculateAngle(a, b, c) {
     return angle;
 }
 
-function analyzePoseDetails(landmarks, exercise) {
+function analyzePoseAndGiveFeedback(landmarks, exercise) {
     if (!Array.isArray(landmarks) || landmarks.length < 33) {
-        return { valid: false, message: "No valid pose detected." };
+        return { feedback: "Step into frame!", isGood: false };
     }
 
     const parts = {
-        nose: landmarks[0],
         leftShoulder: landmarks[11],
         rightShoulder: landmarks[12],
         leftElbow: landmarks[13],
@@ -70,218 +141,142 @@ function analyzePoseDetails(landmarks, exercise) {
         rightAnkle: landmarks[28],
     };
 
-    // Calculate key metrics
-    const leftElbowAngle = calculateAngle(parts.leftShoulder, parts.leftElbow, parts.leftWrist);
-    const rightElbowAngle = calculateAngle(parts.rightShoulder, parts.rightElbow, parts.rightWrist);
-    const leftKneeAngle = calculateAngle(parts.leftHip, parts.leftKnee, parts.leftAnkle);
-    const rightKneeAngle = calculateAngle(parts.rightHip, parts.rightKnee, parts.rightAnkle);
-    const leftHipAngle = calculateAngle(parts.leftShoulder, parts.leftHip, parts.leftKnee);
-    const rightHipAngle = calculateAngle(parts.rightShoulder, parts.rightHip, parts.rightKnee);
+    const angles = {
+        leftElbow: calculateAngle(parts.leftShoulder, parts.leftElbow, parts.leftWrist),
+        rightElbow: calculateAngle(parts.rightShoulder, parts.rightElbow, parts.rightWrist),
+        leftKnee: calculateAngle(parts.leftHip, parts.leftKnee, parts.leftAnkle),
+        rightKnee: calculateAngle(parts.rightHip, parts.rightKnee, parts.rightAnkle),
+        leftHip: calculateAngle(parts.leftShoulder, parts.leftHip, parts.leftKnee),
+        rightHip: calculateAngle(parts.rightShoulder, parts.rightHip, parts.rightKnee),
+    };
 
-    // Back alignment (vertical distance between shoulders and hips)
     const backAlignment = Math.abs(
         (parts.leftShoulder.y + parts.rightShoulder.y) / 2 - (parts.leftHip.y + parts.rightHip.y) / 2
     );
-
-    // Shoulder level (should be equal)
-    const shoulderLevel = Math.abs(parts.leftShoulder.y - parts.rightShoulder.y);
-
-    // Hip level
     const hipLevel = Math.abs(parts.leftHip.y - parts.rightHip.y);
 
-    return {
-        valid: true,
-        angles: {
-            leftElbow: leftElbowAngle.toFixed(0),
-            rightElbow: rightElbowAngle.toFixed(0),
-            leftKnee: leftKneeAngle.toFixed(0),
-            rightKnee: rightKneeAngle.toFixed(0),
-            leftHip: leftHipAngle.toFixed(0),
-            rightHip: rightHipAngle.toFixed(0),
-        },
-        alignment: {
-            back: backAlignment.toFixed(2),
-            shoulders: shoulderLevel.toFixed(2),
-            hips: hipLevel.toFixed(2),
-        },
-        positions: parts,
-    };
-}
+    const exerciseLower = exercise.toLowerCase();
+    let feedback = "";
+    let isGood = true;
 
-function generateExercisePrompt(exercise, analysis) {
-    const { angles, alignment } = analysis;
-
-    const exerciseContext = {
-        squat: `SQUAT CHECK:
-- Knee angle: ${angles.leftKnee}° (ideal: 90-110°)
-- Hip angle: ${angles.leftHip}° (should be similar to knee)
-- Back alignment: ${alignment.back} (lower is straighter)
-- Hip level: ${alignment.hips} (should be <0.05)`,
+    // SQUAT ANALYSIS
+    if (exerciseLower.includes('squat')) {
+        const kneeAngle = Math.min(angles.leftKnee, angles.rightKnee);
+        const hipAngle = Math.min(angles.leftHip, angles.rightHip);
         
-        pushup: `PUSH-UP CHECK:
-- Elbow angle: ${angles.leftElbow}° (full rep: 90° down, 170° up)
-- Back alignment: ${alignment.back} (should stay flat ~0.3-0.4)
-- Shoulder level: ${alignment.shoulders} (should be <0.03)
-- Hip position: Should align with shoulders`,
-        
-        plank: `PLANK CHECK:
-- Back alignment: ${alignment.back} (should be flat ~0.3-0.4)
-- Hip angle: ${angles.leftHip}° (ideal: 170-180°, no sagging)
-- Shoulder position: Should be directly over elbows/wrists
-- Body should form straight line`,
-        
-        lunge: `LUNGE CHECK:
-- Front knee angle: ${angles.leftKnee}° (ideal: 90°)
-- Back knee angle: ${angles.rightKnee}° (should be ~90° when lowered)
-- Hip level: ${alignment.hips} (should be even)
-- Front knee should not pass toes`,
-    };
-
-    const context = exerciseContext[exercise.toLowerCase()] || `
-Exercise: ${exercise}
-Key angles: Elbow ${angles.leftElbow}°, Knee ${angles.leftKnee}°, Hip ${angles.leftHip}°
-Alignment: Back ${alignment.back}, Shoulders ${alignment.shoulders}`;
-
-    return `You're a gym trainer watching ${exercise}. Be direct and energetic.
-
-${context}
-
-Give ONE of these:
-1. If form is WRONG: Point out the WORST issue + quick fix (10-15 words max)
-2. If form is GOOD: Short encouragement (5-8 words)
-
-Examples:
-- "Knees caving in! Push them outward!"
-- "Back's rounding! Chest up, core tight!"
-- "Perfect depth! That's the way!"
-- "Elbows flaring! Tuck them in closer!"
-
-Your call:`;
-}
-
-// ========== VOICE GENERATION WITH CACHING ==========
-
-async function generateVoiceFeedback(text, filename = "feedback.mp3") {
-    const outputPath = path.join(publicDir, filename);
-    
-    // Check cache first
-    const cached = feedbackCache.get(text);
-    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
-        console.log("Using cached audio");
-        return cached.url;
-    }
-
-    try {
-        const response = await fetch(
-            `https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}`,
-            {
-                method: "POST",
-                headers: {
-                    "xi-api-key": ELEVENLABS_API_KEY,
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                    text,
-                    model_id: "eleven_turbo_v2_5",
-                    voice_settings: {
-                        stability: 0.4,
-                        similarity_boost: 0.8,
-                        style: 0.5,
-                        use_speaker_boost: true,
-                    },
-                }),
-            }
-        );
-
-        if (!response.ok) {
-            throw new Error(`ElevenLabs error: ${response.statusText}`);
+        if (kneeAngle < 70 || kneeAngle > 120) {
+            feedback = randomFrom(FEEDBACK_LIBRARY.squat.kneesBad);
+            isGood = false;
+        } else if (kneeAngle > 110) {
+            feedback = randomFrom(FEEDBACK_LIBRARY.squat.depthBad);
+            isGood = false;
+        } else if (backAlignment > 0.5) {
+            feedback = randomFrom(FEEDBACK_LIBRARY.squat.backBad);
+            isGood = false;
+        } else {
+            feedback = randomFrom(FEEDBACK_LIBRARY.squat.good);
+            isGood = true;
         }
-
-        const buffer = await response.arrayBuffer();
-        fs.writeFileSync(outputPath, Buffer.from(buffer));
-        
-        const audioUrl = `/audio/${filename}`;
-        feedbackCache.set(text, { url: audioUrl, timestamp: Date.now() });
-        
-        return audioUrl;
-    } catch (err) {
-        console.error("Voice generation error:", err.message);
-        return null;
     }
+    // PUSHUP ANALYSIS
+    else if (exerciseLower.includes('push')) {
+        const elbowAngle = Math.min(angles.leftElbow, angles.rightElbow);
+        
+        if (elbowAngle > 160) {
+            feedback = "Start position! Go down!";
+            isGood = false;
+        } else if (elbowAngle < 70 || elbowAngle > 110) {
+            feedback = randomFrom(FEEDBACK_LIBRARY.pushup.depthBad);
+            isGood = false;
+        } else if (backAlignment > 0.5) {
+            feedback = randomFrom(FEEDBACK_LIBRARY.pushup.hipsBad);
+            isGood = false;
+        } else {
+            feedback = randomFrom(FEEDBACK_LIBRARY.pushup.good);
+            isGood = true;
+        }
+    }
+    // PLANK ANALYSIS
+    else if (exerciseLower.includes('plank')) {
+        const hipAngle = Math.min(angles.leftHip, angles.rightHip);
+        
+        if (hipAngle < 160) {
+            feedback = randomFrom(FEEDBACK_LIBRARY.plank.hipsBad);
+            isGood = false;
+        } else if (backAlignment > 0.5) {
+            feedback = "Hips too high! Lower down!";
+            isGood = false;
+        } else {
+            feedback = randomFrom(FEEDBACK_LIBRARY.plank.good);
+            isGood = true;
+        }
+    }
+    // LUNGE ANALYSIS
+    else if (exerciseLower.includes('lunge')) {
+        const frontKnee = Math.min(angles.leftKnee, angles.rightKnee);
+        
+        if (frontKnee < 70 || frontKnee > 110) {
+            feedback = randomFrom(FEEDBACK_LIBRARY.lunge.kneeBad);
+            isGood = false;
+        } else {
+            feedback = randomFrom(FEEDBACK_LIBRARY.lunge.good);
+            isGood = true;
+        }
+    }
+    // DEFAULT
+    else {
+        feedback = randomFrom(FEEDBACK_LIBRARY.default.good);
+        isGood = true;
+    }
+
+    return { feedback, isGood, angles };
 }
 
-app.use("/audio", express.static(publicDir));
+function randomFrom(array) {
+    return array[Math.floor(Math.random() * array.length)];
+}
 
 // ========== SOCKET HANDLERS ==========
 
 io.on("connection", (socket) => {
-    console.log("Client connected:", socket.id);
+    console.log("✓ Client connected:", socket.id);
     
-    // Initialize user session
     userSessions.set(socket.id, {
         repCount: 0,
         goodReps: 0,
         startTime: Date.now(),
-        lastFeedback: null,
+        lastFeedbackTime: 0,
         exercise: null,
     });
 
     socket.on("pose_data", async (data) => {
         try {
-            // Rate limiting
-            const lastRequest = rateLimiter.get(socket.id);
-            if (lastRequest && Date.now() - lastRequest < RATE_LIMIT_MS) {
-                return; // Skip this frame
-            }
-            rateLimiter.set(socket.id, Date.now());
-
             const { exercise, landmarks } = data;
             const session = userSessions.get(socket.id);
             
             if (!session.exercise) session.exercise = exercise;
 
-            const analysis = analyzePoseDetails(landmarks, exercise);
-            
-            if (!analysis.valid) {
-                socket.emit("llm_feedback", { 
-                    feedback: "Can't see you clearly. Step back a bit!", 
-                    audioUrl: null 
-                });
+            // Rate limiting for instant feedback
+            const now = Date.now();
+            if (now - session.lastFeedbackTime < INSTANT_FEEDBACK_RATE) {
                 return;
             }
+            session.lastFeedbackTime = now;
 
-            const prompt = generateExercisePrompt(exercise, analysis);
-
-            const response = await ollama.chat({
-                model: "llama3.2:3b",
-                messages: [{ role: "user", content: prompt }],
-                options: {
-                    temperature: 0.7,
-                    top_p: 0.9,
-                    num_predict: 50, // Limit response length
-                },
-            });
-
-            let feedback = response.message?.content?.trim() || "Keep pushing!";
+            // INSTANT ANALYSIS
+            const result = analyzePoseAndGiveFeedback(landmarks, exercise);
             
-            // Track stats
+            // Update stats
             session.repCount++;
-            if (feedback.toLowerCase().includes("good") || 
-                feedback.toLowerCase().includes("nice") ||
-                feedback.toLowerCase().includes("perfect")) {
+            if (result.isGood) {
                 session.goodReps++;
             }
 
-            console.log(`Feedback [${session.repCount}]: ${feedback}`);
-
-            const audioUrl = await generateVoiceFeedback(
-                feedback, 
-                `feedback-${socket.id}-${Date.now()}.mp3`
-            );
+            console.log(`✅ [${session.repCount}] INSTANT: ${result.feedback}`);
 
             socket.emit("llm_feedback", { 
-                feedback, 
-                audioUrl,
+                feedback: result.feedback,
+                useBrowserTTS: true,
                 stats: {
                     reps: session.repCount,
                     goodReps: session.goodReps,
@@ -290,10 +285,10 @@ io.on("connection", (socket) => {
             });
 
         } catch (err) {
-            console.error("Error:", err.message);
+            console.error("❌ Error:", err.message);
             socket.emit("llm_feedback", { 
-                feedback: "Technical issue. Keep going!", 
-                audioUrl: null 
+                feedback: "Keep going!",
+                useBrowserTTS: true
             });
         }
     });
@@ -313,9 +308,8 @@ io.on("connection", (socket) => {
     });
 
     socket.on("disconnect", () => {
-        console.log("Client disconnected:", socket.id);
+        console.log("✗ Client disconnected:", socket.id);
         userSessions.delete(socket.id);
-        rateLimiter.delete(socket.id);
     });
 });
 
@@ -326,29 +320,19 @@ app.get("/health", (req, res) => {
         status: "ok", 
         timestamp: new Date().toISOString(),
         activeSessions: userSessions.size,
+        mode: "instant-feedback",
+        feedbackRate: `${INSTANT_FEEDBACK_RATE}ms`,
     });
 });
 
-app.get("/voices", async (req, res) => {
-    try {
-        const response = await fetch("https://api.elevenlabs.io/v1/voices", {
-            headers: { "xi-api-key": ELEVENLABS_API_KEY },
-        });
-        const data = await response.json();
-        res.json(data.voices.map(v => ({
-            name: v.name,
-            voice_id: v.voice_id,
-            category: v.category,
-        })));
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// ========== START SERVER ==========
-
+// START SERVER
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-    console.log(`AI Gym Trainer Server running on port ${PORT}`);
-    console.log(`Health check: http://localhost:${PORT}/health`);
+    console.log(`\n⚡ AI Gym Trainer Server (INSTANT MODE)`);
+    console.log(`📡 Port: ${PORT}`);
+    console.log(`⏱️  Feedback every: ${INSTANT_FEEDBACK_RATE}ms`);
+    console.log(`🧠 Mode: Rule-based instant feedback`);
+    console.log(`🔊 Voice: Browser TTS\n`);
+    console.log(`Health: http://localhost:${PORT}/health\n`);
+    console.log(`💡 No LLM delays - instant smart feedback!\n`);
 });
